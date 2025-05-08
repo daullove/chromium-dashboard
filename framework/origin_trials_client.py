@@ -411,3 +411,43 @@ def create_launch_issue(
     raise e
   response_json = response.json()
   return response_json.get('issue_id'), response_json.get('failed_reason')
+
+def verify_continuity_issue(continuity_id: int) -> tuple[int|None, bool|None]:
+  """Verify the status of an existing continuity ID in IssueTracker, and return
+        a launch issue ID if it exists.
+
+  Returns:
+    A tuple containing the launch issue ID and a boolean indicating whether
+      the continuity ID is valid.
+    If the continuity ID is not valid, the launch issue ID will be None.
+  Raises:
+    requests.exceptions.RequestException: If the request fails to connect or
+      the HTTP status code is not successful.
+  """
+  if settings.DEV_MODE:
+    logging.info('Creation request will not be sent to origin trials API '
+                  'in local environment.')
+    return
+  key = secrets.get_ot_api_key()
+  # Return if no API key is found.
+  if key is None:
+    return
+
+  access_token = _get_ot_access_token()
+  url = (
+      f'{settings.OT_API_URL}/v1/security-review-issues/{continuity_id}:verify')
+  headers = {'Authorization': f'Bearer {access_token}'}
+  try:
+    response = requests.get(
+        url, headers=headers, params={'key': key})
+    logging.info(response.text)
+    response.raise_for_status()
+  except requests.exceptions.RequestException as e:
+    logging.exception('Failed to get response from origin trials API.')
+    raise e
+  response_json = response.json()
+  return {
+    'verification_status': response_json.get('verification_status'),
+    'verification_failure_reason': response_json.get('verification_failure_reason'),
+    'launch_issue_id': response_json.get('launch_issue_id'),
+  }

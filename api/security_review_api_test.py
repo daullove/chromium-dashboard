@@ -15,7 +15,10 @@
 from unittest import mock
 
 import flask
+import requests
 import werkzeug.exceptions  # Flask HTTP stuff.
+
+from chromestatus_openapi.models import VerifyContinuityIssueResponse
 
 import testing_config  # Must be imported before the module under test.
 from api import security_review_api
@@ -42,11 +45,46 @@ class SecurityReviewAPITest(testing_config.CustomTestCase):
         stage_id=self.ot_stage_1.key.integer_id(),
         gate_type=3, state=Vote.APPROVED)
     self.ot_gate_1.put()
-    self.request_path = (
-        f'/api/v0/{self.feature_1_id}/{self.ot_stage_1.key.integer_id()}'
-        '/create-security-review-issue')
+    self.continuity_id = 444
+    self.request_path = '/api/v0/security_review/'
 
     self.handler = security_review_api.SecurityReviewAPI()
+
+  def tearDown(self):
+    for kind in [FeatureEntry, Gate]:
+      for entity in kind.query():
+        entity.key.delete()
+
+  @mock.patch('framework.origin_trials_client.verify_continuity_issue')
+  def test_get__valid(self, mock_verify):
+    """A list of public trials is returned."""
+    testing_config.sign_in('owner@example.com', 1234567890)
+    mock_verify.return_value = {
+      'verification_status': True,
+      'verification_failure_reason': None,
+      'launch_issue_id': 123
+    }
+    with test_app.test_request_context(
+        f'{self.request_path}/{self.continuity_id}', method='GET'):
+      result = self.handler.do_get(continuity_id=self.continuity_id)
+    self.assertEqual(VerifyContinuityIssueResponse.from_dict({
+      'verification_status': True,
+      'verification_failure_reason': None,
+      'launch_issue_id': 123
+    }), result)
+
+  @mock.patch('logging.exception')
+  @mock.patch('logging.error')
+  @mock.patch('framework.origin_trials_client.verify_continuity_issue')
+  def test_get__invalid(
+      self, mock_verify, mock_log_error, mock_log_exception):
+    """A request error from the origin trials API raises the correct exception."""
+    testing_config.sign_in('owner@example.com', 1234567890)
+    mock_verify.side_effect = requests.exceptions.RequestException
+    with test_app.test_request_context(
+        self.request_path, method='GET'):
+      with self.assertRaises(werkzeug.exceptions.InternalServerError):
+        self.handler.do_get(continuity_id=self.continuity_id)
 
   def test_do_post__feature_id_missing(self):
     """Give a 400 if the feature ID is not provided."""

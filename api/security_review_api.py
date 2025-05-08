@@ -15,7 +15,7 @@
 import requests
 
 from chromestatus_openapi.models import (
-    CreateLaunchIssueRequest, SuccessMessage)
+    CreateLaunchIssueRequest, SuccessMessage, VerifyContinuityIssueResponse)
 
 from framework import permissions
 from framework import basehandlers, origin_trials_client
@@ -23,6 +23,25 @@ from internals.core_models import FeatureEntry
 from internals.review_models import Gate
 
 class SecurityReviewAPI(basehandlers.APIHandler):
+
+  def do_get(self, **kwargs):
+    """Endpoint to verify a continuity issue ID and return an associated
+    launch issue ID if it exists."""
+    continuity_id_arg = kwargs.get('continuity_id')
+    if not continuity_id_arg:
+      self.abort(400, msg='No continuity ID specified.')
+    try:
+      continuity_id = int(continuity_id_arg)
+    except ValueError:
+      self.abort(400, msg='Invalid continuity ID.')
+
+    try:
+      resp = origin_trials_client.verify_continuity_issue(continuity_id)
+    except requests.exceptions.RequestException:
+      self.abort(500, 'Error obtaining origin trial data from API')
+    except KeyError:
+      self.abort(500, 'Malformed response from origin trials API')
+    return VerifyContinuityIssueResponse.from_dict(resp)
 
   def do_post(self, **kwargs):
     """Endpoint to create a new security review in IssueTracker.
